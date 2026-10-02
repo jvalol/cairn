@@ -57,6 +57,21 @@ pub const SURVIVES: f32 = HALF.y * 4.0;
 
 pub const GRAVITY: Vec3 = vec3(0.0, -9.81, 0.0);
 
+/// How much speed a block has to lose in one step to count as having hit
+/// something, per spec 0004. Below this it is a stack shuffling, and a knock
+/// for every one of those is a rattle that never stops.
+pub const MIN_KNOCK: f32 = 0.9;
+/// And the loss that counts as flat out, so anything harder is as loud as it
+/// gets.
+pub const LOUDEST_KNOCK: f32 = 6.0;
+/// How many are heard out of any one step. A collapse is dozens of impacts in a
+/// few frames and dozens of knocks together is a bang with no shape.
+pub const AT_ONCE: usize = 3;
+
+/// How far above its seat a block is let go when it goes on top. Far enough to
+/// land rather than appear, which is both a knock and something to watch.
+pub const LAID_FROM: f32 = 0.35;
+
 /// How wide the ground is. Nothing rests on its edges; it is there so a block
 /// that has been let go has somewhere to land.
 pub const GROUND: f32 = 24.0;
@@ -82,6 +97,15 @@ struct Held {
     asked: f32,
 }
 
+/// Something hitting something, for the window to make a noise about.
+#[derive(Debug, Clone, Copy)]
+pub struct Knock {
+    pub which: usize,
+    pub at: Vec3,
+    /// How hard, from nothing to all of it.
+    pub force: f32,
+}
+
 pub struct Run {
     blocks: Vec<Body>,
     /// Which level each block belongs to. Blocks are never removed, only moved
@@ -100,6 +124,8 @@ pub struct Run {
     top: usize,
     filled: usize,
     out: u32,
+    /// What hit something this step, waiting to be heard.
+    knocks: Vec<Knock>,
     /// The highest the tower has stood, to measure a collapse against.
     stood: f32,
 }
@@ -129,12 +155,19 @@ impl Run {
             top: tower::LEVELS - 1,
             filled: ACROSS,
             out: 0,
+            knocks: Vec::new(),
             stood: tower::LEVELS as f32 * HALF.y * 2.0,
         }
     }
 
     pub fn blocks(&self) -> &[Body] {
         &self.blocks
+    }
+
+    /// What has hit something since this was last asked. Taken rather than
+    /// read, so nothing is heard twice.
+    pub fn knocks(&mut self) -> Vec<Knock> {
+        std::mem::take(&mut self.knocks)
     }
 
     pub fn phase(&self) -> Phase {
@@ -255,8 +288,14 @@ impl Run {
             block.velocity += held.way * more;
         }
 
+        // what everything was doing before the step, to tell a landing from a
+        // settle afterwards
+        let was: Vec<f32> = self.blocks.iter().map(|b| b.velocity.length()).collect();
+
         self.solver
             .step(&mut self.blocks, &self.ground, GRAVITY, dt);
+
+        self.listen(&was);
 
         // whether it is still being held or was let go part way out
         if let Some(loose) = self.held.or(self.coming) {
@@ -285,7 +324,10 @@ impl Run {
             self.filled = 0;
         }
 
-        let (at, flat) = tower::seat(self.top, self.filled);
+        let (seat, flat) = tower::seat(self.top, self.filled);
+        // dropped the last of the way rather than set down, so it lands on the
+        // level below with a knock and settles into place like everything else
+        let at = seat + vec3(0.0, LAID_FROM, 0.0);
         let half = if flat {
             HALF
         } else {
@@ -310,6 +352,37 @@ impl Run {
         // a contact is remembered by the pair it is between, and one of this
         // pair is somewhere else entirely now
         self.solver.forget();
+    }
+
+    /// Writes down what hit something, per spec 0004. An impact is a loss of
+    /// speed: a block that was moving and now is not has hit something, and how
+    /// much it lost is how hard.
+    ///
+    /// Only the loudest few of a step are kept. A collapse is dozens of these
+    /// at once and all of them together is one bang, which is both less
+    /// interesting and less like a room.
+    fn listen(&mut self, was: &[f32]) {
+        let mut heard: Vec<Knock> = self
+            .blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(which, block)| {
+                let lost = was[which] - block.velocity.length();
+                if lost < MIN_KNOCK {
+                    return None;
+                }
+
+                Some(Knock {
+                    which,
+                    at: block.position,
+                    force: ((lost - MIN_KNOCK) / (LOUDEST_KNOCK - MIN_KNOCK)).clamp(0.0, 1.0),
+                })
+            })
+            .collect();
+
+        heard.sort_by(|one, other| other.force.total_cmp(&one.force));
+        heard.truncate(AT_ONCE);
+        self.knocks.extend(heard);
     }
 
     /// Watches the top of the tower, and the run ends when it falls.
@@ -522,6 +595,108 @@ mod tests {
 
             assert_eq!(run.out(), 1, "pulled {} and it did not count", sign);
         }
+    }
+
+    /// Spec 0004: a block that lands knocks. One drawn out goes on top, and it
+    /// is let go a little above its seat so it lands rather than appears.
+    #[test]
+    fn a_landing_knocks() {
+        let mut run = Run::new();
+        settle(&mut run, 600);
+        run.knocks();
+
+        draw_out(&mut run, sparing(0));
+
+        let heard = run.knocks();
+        assert!(!heard.is_empty(), "it was laid on top in silence");
+        assert!(heard.iter().all(|knock| knock.force > 0.0));
+    }
+
+    /// Spec 0004: and a tower doing nothing is silent. A stack of forty eight
+    /// is always shuffling a little, and a knock for each of those is a rattle
+    /// that never stops.
+    #[test]
+    fn a_settle_is_silent() {
+        let mut run = Run::new();
+        settle(&mut run, 600);
+        run.knocks();
+
+        settle(&mut run, 600);
+        assert!(
+            run.knocks().is_empty(),
+            "a tower standing still made a noise"
+        );
+    }
+
+    /// Spec 0004: harder is louder.
+    #[test]
+    fn harder_is_louder() {
+        let loudest = |from: f32| {
+            let mut blocks = vec![Body::block(vec3(0.0, from, 0.0), tower::HALF, 1.0)
+                .with_restitution(tower::BOUNCE)
+                .with_friction(tower::GRIP)];
+            let mut run = Run::new();
+            run.blocks = std::mem::take(&mut blocks);
+            run.seated = vec![0];
+            run.knocks();
+
+            let mut most = 0.0f32;
+            for _ in 0..600 {
+                run.step(1.0 / 120.0);
+                for knock in run.knocks() {
+                    most = most.max(knock.force);
+                }
+            }
+            most
+        };
+
+        let soft = loudest(0.6);
+        let hard = loudest(6.0);
+
+        assert!(soft > 0.0, "a drop of its own height made no sound");
+        assert!(
+            hard > soft,
+            "{} from high up against {} from low",
+            hard,
+            soft
+        );
+    }
+
+    /// Spec 0004: a collapse is dozens of impacts in a few frames, and dozens of
+    /// knocks together is one bang with no shape.
+    #[test]
+    fn a_collapse_does_not_knock_once_a_block() {
+        let mut run = Run::new();
+        settle(&mut run, 600);
+        run.knocks();
+
+        let mut worst = 0;
+        for seat in 0..ACROSS {
+            let along = run.along(seat).expect("it is a block");
+            run.grab(seat, along);
+            run.ask_for(CLEAR + 1.0);
+
+            for _ in 0..1200 {
+                run.step(1.0 / 120.0);
+                worst = worst.max(run.knocks().len());
+            }
+        }
+
+        assert_eq!(run.phase(), Phase::Over, "it never came down");
+        assert!(worst <= AT_ONCE, "{} knocks came out of one step", worst);
+        assert!(worst > 0, "a tower came down in silence");
+    }
+
+    /// Spec 0004: and they are taken when they are read, so none is heard twice.
+    #[test]
+    fn a_knock_is_heard_once() {
+        let mut run = Run::new();
+        settle(&mut run, 600);
+        run.knocks();
+
+        draw_out(&mut run, sparing(0));
+        assert!(!run.knocks().is_empty(), "it landed in silence");
+        assert!(run.knocks().is_empty(), "the same knock came back");
     }
 
     #[test]

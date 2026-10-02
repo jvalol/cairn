@@ -2,6 +2,7 @@
 
 mod grain;
 mod hand;
+mod knock;
 mod rules;
 mod tower;
 
@@ -65,6 +66,10 @@ struct Cairn {
     /// The ray the cursor is pointing along, worked out in `draw` where the
     /// camera is.
     pointing: Option<Ray>,
+    /// Where the camera is and which way it faces, so the ears can follow it.
+    ears: Option<(Vec3, Vec3)>,
+    /// How much sound is already queued and not yet played, in seconds.
+    waiting: f32,
     /// Where along its own length the block in hand was when it was grabbed, so
     /// the cursor asks for a move rather than a place.
     grabbed_along: f32,
@@ -94,6 +99,8 @@ impl Cairn {
             // empty. From round here it lies across the view.
             looking: tower::LEVELS as f32 * tower::HALF.y * 0.9,
             pointing: None,
+            ears: None,
+            waiting: 0.0,
             grabbed_along: 0.0,
             held_way: Vec3::X,
             held_from: Vec3::ZERO,
@@ -131,9 +138,41 @@ impl Game for Cairn {
         dt: f32,
         _geometry: &mut Geometry,
         text_renderer: &mut TextRenderer,
-        _sound_system: &SoundSystem,
+        sound_system: &SoundSystem,
     ) {
         self.run.step(dt);
+
+        self.waiting = (self.waiting - dt).max(0.0);
+
+        if let Some((at, facing)) = self.ears {
+            sound_system.set_listener(at, facing, Vec3::Y);
+
+            for hit in self.run.knocks() {
+                // The engine plays what it is given one sound after another, so
+                // a collapse handed over whole is a collapse that is still being
+                // heard once everything has stopped. What cannot be played while
+                // it is still happening is not played at all.
+                if !knock::room_for_another(self.waiting) {
+                    break;
+                }
+                self.waiting += knock::SECONDS;
+
+                // Placed a stride from the ears in the direction of the block
+                // rather than where the block actually is. The engine's spatial
+                // sound fades with one over the distance squared, in world
+                // units, and this camera sits eighteen units back: a knock at
+                // the tower came out at three thousandths of itself, which is
+                // why none of them could be heard at all. The direction is what
+                // carries the left and right, and the distance here is only
+                // about how loud.
+                let towards = (hit.at - at).normalize_or_zero();
+
+                sound_system.queue_spatial(
+                    knock::knock(knock::loudness(hit.force), knock::colour_of(hit.which)),
+                    (at + towards * knock::EARSHOT).to_array(),
+                );
+            }
+        }
 
         let saying = match self.run.phase() {
             Phase::Choosing => match self.refused {
@@ -240,6 +279,7 @@ impl Game for Cairn {
             self.camera_up,
             self.distance,
         );
+        self.ears = Some((camera.position, camera.target - camera.position));
 
         let ray = camera.ray_through(self.cursor);
         self.pointing = Some(ray);
