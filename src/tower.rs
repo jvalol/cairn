@@ -12,21 +12,53 @@ pub const LEVELS: usize = 12;
 /// three remain, two of them still under the level above.
 pub const ACROSS: usize = 4;
 
-/// Half a block. Square in section and four long, so a level is four by four.
-pub const HALF: Vec3 = vec3(2.0, 0.5, 0.5);
+/// How long a block is, which is also how wide a level is: four blocks and the
+/// gaps between them come to exactly this, so every level is square in plan and
+/// the one above it lands square on it.
+pub const LONG: f32 = 4.0;
+
+/// The gap between two blocks of a level. Real ones are cut a hair narrow and
+/// it matters twice over: a level with no gaps reads as one slab, so a block
+/// drawn out of it leaves a hole nobody can see, and blocks pressed against
+/// each other are held by their sides as well as from above, which is grip the
+/// game should not have.
+pub const GAP: f32 = 0.08;
+
+/// Half a block. Square in section, so its width and its thickness are the same
+/// number, and that number is whatever is left of a level once the gaps are
+/// taken out.
+pub const WIDE: f32 = (LONG - (ACROSS as f32 - 1.0) * GAP) / ACROSS as f32;
+pub const HALF: Vec3 = vec3(LONG * 0.5, WIDE * 0.5, WIDE * 0.5);
 
 /// How bouncy a block is, which is not at all. Wood on wood at the speeds a
 /// tower moves at does not come back.
 pub const BOUNCE: f32 = 0.0;
-/// How much they grip. A number to find rather than to pick: too little and a
-/// block cannot be slid out without the tower following it, too much and it
-/// cannot be slid out at all.
-pub const GRIP: f32 = 0.6;
+/// How much they grip. Found rather than picked, per spec 0001. Drawing one
+/// block out of a full bottom level and measuring how far the worst of the
+/// other forty seven moved, and whether the run survived:
+///
+/// ```text
+///        seat 0        seat 1   seat 2        seat 3
+/// 0.25   0.47          0.10     0.42          5.62, fatal
+/// 0.40   0.34          0.18     0.33          0.73
+/// 0.60   3.06, fatal   0.16     0.13          0.60
+/// ```
+///
+/// 0.4 is the only one where a full level can spare any of its four, which is
+/// what the first pull of a game should be. Too little and an outer block slides
+/// before the ones above it have settled onto what is left; too much and drawing
+/// one out drags its neighbours with it.
+///
+/// These numbers are from after the gap arrived. Before it, blocks were pressed
+/// against each other side to side and an outer one was fatal at every grip
+/// tried, which looked like a game about which seat to pick and was really a
+/// game about a gap that was missing.
+pub const GRIP: f32 = 0.4;
 
 /// Where the blocks of a level sit, as an offset along the level's own width.
 pub fn seats() -> Vec<f32> {
     (0..ACROSS)
-        .map(|seat| (seat as f32 - (ACROSS as f32 - 1.0) * 0.5) * HALF.z * 2.0)
+        .map(|seat| (seat as f32 - (ACROSS as f32 - 1.0) * 0.5) * (WIDE + GAP))
         .collect()
 }
 
@@ -70,14 +102,15 @@ pub fn built() -> Vec<Body> {
     blocks
 }
 
-/// How tall it still reaches, in levels.
+/// How tall it reaches, in levels. Not capped at `LEVELS`: a run puts what it
+/// pulls on top, so a tower that is going well is taller than it was built.
 pub fn levels(blocks: &[Body]) -> usize {
     let top = blocks
         .iter()
         .map(|block| block.position.y)
         .fold(0.0f32, f32::max);
 
-    (((top - HALF.y) / (HALF.y * 2.0)).round() as usize + 1).min(LEVELS)
+    ((top - HALF.y) / (HALF.y * 2.0)).round().max(0.0) as usize + 1
 }
 
 #[cfg(test)]
@@ -109,21 +142,30 @@ mod tests {
     }
 
     #[test]
-    fn a_level_is_four_blocks_side_by_side_touching() {
+    fn a_level_is_four_blocks_side_by_side_with_a_gap() {
         let seats = seats();
 
         assert_eq!(seats.len(), ACROSS);
         for pair in seats.windows(2) {
-            let apart = pair[1] - pair[0];
+            let apart = pair[1] - pair[0] - WIDE;
             assert!(
-                (apart - HALF.z * 2.0).abs() < 1e-6,
-                "{} apart, which is not one block",
+                (apart - GAP).abs() < 1e-6,
+                "{} of gap, which is not what was asked for",
                 apart
             );
         }
 
         // and the level is as wide as a block is long, so it is square in plan
-        let width = seats[ACROSS - 1] - seats[0] + HALF.z * 2.0;
-        assert!((width - HALF.x * 2.0).abs() < 1e-6, "{} across", width);
+        // and the level above lands square on it
+        let width = seats[ACROSS - 1] - seats[0] + WIDE;
+        assert!(
+            (width - LONG).abs() < 1e-6,
+            "{} across, not {}",
+            width,
+            LONG
+        );
+
+        // and a block is square in section
+        assert!((HALF.y - HALF.z).abs() < 1e-6);
     }
 }
