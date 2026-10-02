@@ -1,5 +1,6 @@
 //! cairn: a tower of blocks you take apart one at a time. See `specs/`.
 
+mod grain;
 mod hand;
 mod rules;
 mod tower;
@@ -12,7 +13,7 @@ use blitzkit::mesh::{MeshData, Transform};
 use blitzkit::mouse::{MouseButton, MouseInput};
 use blitzkit::physics::Shape;
 use blitzkit::renderer::render_text::{RenderText, TextRenderer};
-use blitzkit::renderer::scene::{MeshId, Scene};
+use blitzkit::renderer::scene::{MeshId, Scene, TextureId};
 use blitzkit::renderer::Renderer;
 use blitzkit::sound::SoundSystem;
 use blitzkit::{start, Game};
@@ -51,6 +52,9 @@ fn hit_block(ray: &Ray, middle: Vec3, turn: Quat, half: Vec3) -> Option<f32> {
 struct Cairn {
     block_mesh: Option<MeshId>,
     floor_mesh: Option<MeshId>,
+    /// One board of wood per kind, so a tower is not forty eight copies of the
+    /// same plank.
+    boards: Vec<TextureId>,
     run: Run,
     cursor: Vec2,
     /// Which block is under the cursor, and where the camera was looking from,
@@ -81,6 +85,7 @@ impl Cairn {
         Self {
             block_mesh: None,
             floor_mesh: None,
+            boards: Vec::new(),
             run: Run::new(),
             cursor: Vec2::ZERO,
             picked: None,
@@ -106,6 +111,10 @@ impl Game for Cairn {
     fn load(&mut self, renderer: &mut Renderer) {
         self.block_mesh = Some(renderer.add_mesh(&MeshData::cube()));
         self.floor_mesh = Some(renderer.add_mesh(&MeshData::plane()));
+        self.boards = grain::boards()
+            .iter()
+            .map(|board| renderer.add_texture(board))
+            .collect();
     }
 
     fn initialize(
@@ -186,13 +195,14 @@ impl Game for Cairn {
                 continue;
             };
 
-            // every other level a shade apart, so which way a level runs is
-            // something you can see rather than work out
+            // The wood carries the colour now, so this is only a tint: every
+            // other level a shade apart, so which way a level runs is something
+            // you can see rather than work out.
             let level = (body.position.y / (tower::HALF.y * 2.0)) as usize;
             let mut colour = if level.is_multiple_of(2) {
-                vec4(0.78, 0.62, 0.42, 1.0)
+                vec4(1.0, 1.0, 1.0, 1.0)
             } else {
-                vec4(0.70, 0.54, 0.36, 1.0)
+                vec4(0.88, 0.85, 0.82, 1.0)
             };
 
             if drawing == Some(which) {
@@ -201,13 +211,20 @@ impl Game for Cairn {
                 colour = (colour + vec4(0.22, 0.22, 0.22, 0.0)).min(vec4(1.0, 1.0, 1.0, 1.0));
             }
 
-            scene.push_material(
+            let board = self
+                .boards
+                .get(grain::worn_by(which))
+                .copied()
+                .unwrap_or(TextureId::WHITE);
+
+            scene.push_textured(
                 block,
+                board,
                 &Transform::at(body.position)
                     .with_rotation(body.orientation)
                     .with_scale(half * 2.0),
                 colour,
-                40.0,
+                16.0,
             );
         }
 
