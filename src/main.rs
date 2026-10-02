@@ -87,15 +87,15 @@ impl Game for Cairn {
 
         text_renderer.reset();
         for (line, text) in vec![
-            String::from("[COPY - Jake] drag with the right button to walk round it, scroll zooms"),
+            String::from("drag with the right button to walk round it, scroll zooms"),
             format!(
-                "[COPY - Jake] {} levels of {}, {} of {} settled",
+                "{} levels of {}, {} of {} settled",
                 tower::levels(&self.blocks),
                 tower::LEVELS,
                 asleep,
                 self.blocks.len()
             ),
-            String::from("[COPY - Jake] pulling blocks out is spec 0001, and is not built yet"),
+            String::from("pulling blocks out is spec 0001, and is not built yet"),
         ]
         .into_iter()
         .enumerate()
