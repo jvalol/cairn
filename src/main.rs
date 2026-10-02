@@ -56,17 +56,17 @@ struct Cairn {
     /// Which block is under the cursor, and where the camera was looking from,
     /// worked out in `draw` where the camera is.
     picked: Option<usize>,
-    /// Where the ray met it, which is the end that was grabbed.
-    aimed: Option<Vec3>,
     /// Where the camera is looking, eased rather than set.
     looking: f32,
-    /// What the whole world looks like from there, kept so a drag can be
-    /// measured along the held block's own length as it lies on the screen.
-    seen: glam::Mat4,
-    /// Where the cursor was when the block in hand was grabbed, and which way
-    /// that block's length runs on the screen.
-    grabbed_at: Vec2,
-    length_on_screen: Vec2,
+    /// The ray the cursor is pointing along, worked out in `draw` where the
+    /// camera is.
+    pointing: Option<Ray>,
+    /// Where along its own length the block in hand was when it was grabbed, so
+    /// the cursor asks for a move rather than a place.
+    grabbed_along: f32,
+    /// The block in hand's length, and where it was when it was taken hold of.
+    held_way: Vec3,
+    held_from: Vec3,
     /// Why the last click did nothing, if it did nothing.
     refused: Option<&'static str>,
     camera_angle: f32,
@@ -84,14 +84,14 @@ impl Cairn {
             run: Run::new(),
             cursor: Vec2::ZERO,
             picked: None,
-            aimed: None,
             // The sun travels towards -x and -z, so a camera at +x and +z has
             // the tower's shadow directly behind it and the floor reads as
             // empty. From round here it lies across the view.
             looking: tower::LEVELS as f32 * tower::HALF.y * 0.9,
-            seen: glam::Mat4::IDENTITY,
-            grabbed_at: Vec2::ZERO,
-            length_on_screen: Vec2::X,
+            pointing: None,
+            grabbed_along: 0.0,
+            held_way: Vec3::X,
+            held_from: Vec3::ZERO,
             refused: None,
             camera_angle: 2.5,
             camera_up: 0.35,
@@ -223,9 +223,19 @@ impl Game for Cairn {
             self.camera_up,
             self.distance,
         );
-        self.seen = camera.view_projection();
 
         let ray = camera.ray_through(self.cursor);
+        self.pointing = Some(ray);
+
+        // The block in hand follows wherever the cursor is pointing, worked out
+        // here because this is where the camera is.
+        if self.run.held().is_some() {
+            if let Some(along) =
+                hand::along_the_line(ray.origin, ray.direction, self.held_from, self.held_way)
+            {
+                self.run.ask_for(along - self.grabbed_along);
+            }
+        }
         self.picked =
             self.run
                 .blocks()
@@ -267,15 +277,24 @@ impl Game for Cairn {
                 }
 
                 let body = self.run.blocks()[which];
-                let Some(along) = self.run.along(which) else {
+                let Some(way) = self.run.along(which) else {
                     return;
                 };
-                let way =
-                    hand::grabbed_end(body.position, self.aimed.unwrap_or(body.position), along);
 
-                self.grabbed_at = self.cursor;
-                self.length_on_screen =
-                    hand::on_screen(self.seen, body.position, way).unwrap_or(Vec2::X);
+                let Some(ray) = self.pointing else {
+                    return;
+                };
+                let Some(along) =
+                    hand::along_the_line(ray.origin, ray.direction, body.position, way)
+                else {
+                    self.refused =
+                        Some("that one is pointing straight at you. walk round a little");
+                    return;
+                };
+
+                self.grabbed_along = along;
+                self.held_way = way;
+                self.held_from = body.position;
                 self.run.grab(which, way);
             }
             MouseButton::Left => self.run.let_go(),
@@ -285,13 +304,6 @@ impl Game for Cairn {
 
     fn cursor_moved(&mut self, position: Vec2) {
         self.cursor = position;
-
-        if self.run.held().is_some() {
-            self.run.ask_for(hand::asked_for(
-                position - self.grabbed_at,
-                self.length_on_screen,
-            ));
-        }
     }
 
     fn mouse_motion(&mut self, delta: Vec2) {

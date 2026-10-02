@@ -20,9 +20,18 @@ thing: the player is not holding the block.
 ## Behavior
 
 **Press and drag, rather than click and watch.** Holding the left button on a
-block grabs it. While it is held, the block is drawn towards wherever the cursor
-has dragged to, measured along the block's own length as that length lies on the
-screen. Let go and it stops where it is.
+block grabs it, and while it is held the block follows the cursor: it is drawn to
+the place on its own length nearest to whatever the cursor is pointing at. Let go
+and it stops where it is.
+
+Nearest point on a line to a ray, not pixels of drag. Pixels was the first
+attempt, measured along the block's length as that length lay on the screen, and
+it fails for exactly the blocks half of a square tower has: one pointing away
+from the eye is a few pixels long however long it is, so its direction is mostly
+noise and a drag of any size asks for almost nothing. What that looked like was
+blocks left hanging part way out, because finishing the pull had become
+impossible. A block pointing straight down the ray is the one case with no
+answer, and it says so and asks you to walk round a little.
 
 So a block that is half out stays half out. That is a real position in this game
 and it was not reachable before: it is how you find out whether the one above has
@@ -36,10 +45,29 @@ whatever is leaning on it. Dragging further does not pull harder, it only asks
 for more. A block that is pinned does not come, and you can feel that it is not
 coming because the cursor has gone somewhere the block has not.
 
-**It comes out the end you grabbed.** Where the ray met the block decides it: the
-near half comes towards you, the far half goes away. Not "towards the camera",
-which is what it was and which meant walking round the tower to pull from the
-other side without ever being told so.
+**It comes out the end you drag it towards.** Not "towards the camera", which
+meant walking round the tower to pull from the other side without ever being told
+so. And not "the end you grabbed", which is what this spec said first and which
+was worse: a block taken hold of anywhere along its long side says nothing about
+which end was meant, so half the time the end chosen was the one pointing into
+the tower, every drag then asked for a negative distance, that was clamped at
+nothing, and the block sat there while the game said nothing at all. The drag
+carries its sign now and the block goes whichever way it is pulled.
+
+**Either way out counts.** How far a block had to go was measured as the
+distance of its middle from the tower's axis, which is a different number for
+every seat of a level: an outer block starts a unit and a half out and an inner
+one half a unit, so an inner one had to travel 4.17 where an outer one needed
+3.93. One drawn out the back of the tower travelled 4.12, finished up lying on
+the floor where the camera could not see it, and was never counted. What that
+looked like was a drag that did nothing, in one direction only. It is measured
+along the block's own length from where it started now, which is the same number
+wherever the block sat.
+
+**Once it is down, the blocks are still blocks.** A run that has ended stops
+counting and stops stacking, and everything on the floor can still be pushed
+about. The rule protecting the top two levels has nothing left to protect, and a
+heap of blocks is a thing worth shoving.
 
 **The tower says what it will allow.** A block under the cursor is one of three
 things, and it looks like all three: takeable, too high to take, or being held.
@@ -52,12 +80,13 @@ because neither tells you anything and both look wrong.
 
 ## Acceptance criteria
 
-- A drag along the block's length moves it that far, give or take what the tower
-  is doing to it. — `hand::tests::a_drag_asks_for_that_much`
-- A drag across the block's length asks for nothing. — `hand::tests::a_drag_across_it_asks_for_nothing`
+- A block goes to the place on its own length nearest to where the cursor points. — `hand::tests::the_block_goes_where_it_is_pointed`
+- Including one pointing away from the eye, which is what pixels of drag could not do. — `hand::tests::a_block_pointing_away_still_follows`
+- One pointing straight down the ray has no answer rather than a bad one. — `hand::tests::a_block_down_the_ray_has_no_answer`
 - Letting go leaves a block where it is rather than finishing the pull. — `rules::tests::letting_go_leaves_it`
-- A block grabbed by its near half comes out that way. — `hand::tests::it_comes_out_the_end_that_was_grabbed`
-- And by its far half, the other way. — `hand::tests::the_other_end_goes_the_other_way`
+- Which way the length was handed over only flips the sign, so where a block was grabbed decides nothing. — `hand::tests::which_way_the_length_was_given_only_flips_the_sign`
+- A tower that has come down can still be pushed about, and is not scored. — `rules::tests::the_rubble_is_still_blocks`
+- A block drawn out either end counts the same. — `rules::tests::it_counts_either_way_out`
 - A block held past clear still goes on top. — `rules::tests::a_held_block_still_goes_on_top`
 - The tilt is clamped short of overhead and of the floor. — `hand::tests::the_tilt_is_clamped`
 
@@ -65,6 +94,7 @@ because neither tells you anything and both look wrong.
 
 - Dragging a block out feels like drawing it out, and stopping stops it.
 - A block that is pinned does not move however far the cursor goes, and that is legible.
+- Any block in the tower can be taken hold of and dragged, from any side, whichever way its length happens to lie.
 - Clicking a block that is too high says why.
 - The tower can be looked at from above enough to see which blocks a level still has.
 

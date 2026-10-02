@@ -1,52 +1,46 @@
-//! Holding a block: where a drag asks it to go, and where the camera looks.
-//! Spec 0002.
+//! Holding a block: where the cursor is asking it to go, and where the camera
+//! looks from. Spec 0002.
 //!
 //! The arithmetic lives here rather than in the window so it can be checked
 //! without one.
 
-use glam::{Mat4, Vec2, Vec3};
-
-/// How far a block is asked to move for one pixel of drag. A block has to
-/// travel its own length to come clear, and a drag of about three hundred
-/// pixels should do it.
-pub const PER_PIXEL: f32 = 0.014;
+use glam::Vec3;
 
 /// How far the camera may tilt, in radians. Short of overhead and short of the
 /// floor: neither tells you anything and both look wrong.
 pub const LOWEST: f32 = 0.08;
 pub const HIGHEST: f32 = 1.2;
 
-/// Which way a direction in the world runs on the screen, as a unit vector in
-/// pixels, or nothing if it is pointing at or away from the eye.
+/// Where a ray comes closest to a line, as a distance along that line from its
+/// own point.
 ///
-/// Screen y counts down and clip space counts up, which is the sign below and
-/// the reason a drag down the window used to pull a block up the tower.
-pub fn on_screen(view_projection: Mat4, at: Vec3, way: Vec3) -> Option<Vec2> {
-    let flat = |point: Vec3| {
-        let clip = view_projection * point.extend(1.0);
-        (clip.w.abs() > 1e-4).then(|| Vec2::new(clip.x / clip.w, -clip.y / clip.w))
-    };
+/// This is how a held block follows the cursor. The cursor points somewhere,
+/// and the place on the block's own length nearest to what it is pointing at is
+/// where the block is asked to be. Nothing is measured in pixels, so it does not
+/// matter how the block's length happens to lie on the screen.
+///
+/// It was pixels, dragged along that length as it appeared on screen, and the
+/// trouble with that is a block pointing away from the eye: its length is then a
+/// few pixels long however long the block is, the direction is mostly noise, and
+/// a drag of any size asks for almost nothing. What that looked like was blocks
+/// left hanging half out of the tower because finishing the pull had become
+/// impossible.
+///
+/// Nothing comes back when the line runs along the ray, which is the one case
+/// with no answer rather than a bad one: the cursor is pointing at the whole
+/// length at once.
+pub fn along_the_line(from: Vec3, towards: Vec3, on: Vec3, way: Vec3) -> Option<f32> {
+    let (ray, line) = (towards.normalize_or_zero(), way.normalize_or_zero());
+    let between = line.dot(ray);
+    let apart = 1.0 - between * between;
 
-    let (here, there) = (flat(at)?, flat(at + way)?);
-    let moved = there - here;
-
-    (moved.length() > 1e-5).then(|| moved.normalize())
-}
-
-/// How far along its own length a block is being asked to move, from how far
-/// the cursor has dragged since it was grabbed.
-pub fn asked_for(dragged: Vec2, length_on_screen: Vec2) -> f32 {
-    dragged.dot(length_on_screen) * PER_PIXEL
-}
-
-/// Which way out of the tower a block grabbed at `at` should go: the end that
-/// was grabbed.
-pub fn grabbed_end(middle: Vec3, at: Vec3, along: Vec3) -> Vec3 {
-    if (at - middle).dot(along) < 0.0 {
-        -along
-    } else {
-        along
+    if apart < 1e-4 {
+        return None;
     }
+
+    let gap = on - from;
+
+    Some((between * ray.dot(gap) - line.dot(gap)) / apart)
 }
 
 /// Where the camera sits, given how far round and how far up it has been
@@ -67,90 +61,65 @@ mod tests {
     use super::*;
     use glam::vec3;
 
-    /// A camera at +z looking at the origin, so world +x runs right across the
-    /// screen and world +y runs up it.
-    fn looking() -> Mat4 {
-        let view = glam::camera::rh::view::look_at_mat4(vec3(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Y);
-        let projection = glam::camera::rh::proj::directx::perspective(1.0, 1.0, 0.1, 100.0);
+    /// Spec 0002: the cursor points somewhere, and the block goes to the place
+    /// on its own length nearest to that.
+    #[test]
+    fn the_block_goes_where_it_is_pointed() {
+        let eye = vec3(0.0, 0.0, 10.0);
+        let block = Vec3::ZERO;
 
-        projection * view
+        let asked = |aimed: Vec3| {
+            along_the_line(eye, aimed - eye, block, Vec3::X).expect("across the view")
+        };
+
+        assert!(asked(block).abs() < 1e-4, "{}", asked(block));
+        assert!((asked(vec3(2.0, 0.0, 0.0)) - 2.0).abs() < 1e-3);
+        assert!((asked(vec3(-2.0, 0.0, 0.0)) + 2.0).abs() < 1e-3);
     }
 
+    /// And it works for a block pointing away from the eye, which is the case
+    /// the pixel version could not do at all.
     #[test]
-    fn a_drag_asks_for_that_much() {
-        let across = on_screen(looking(), Vec3::ZERO, Vec3::X).expect("x is across the view");
-        assert!(across.x > 0.9, "world +x should run right: {}", across);
+    fn a_block_pointing_away_still_follows() {
+        let eye = vec3(0.0, 6.0, 10.0);
+        let aimed = vec3(0.0, 0.0, -3.0);
 
-        // three hundred pixels right is a block's length and then some
-        let asked = asked_for(Vec2::new(300.0, 0.0), across);
-        assert!(asked > 4.0, "{} is not far enough to clear a block", asked);
+        let at =
+            along_the_line(eye, aimed - eye, Vec3::ZERO, Vec3::Z).expect("not quite along the ray");
 
-        // and dragging the other way asks for the other way
-        assert!(asked_for(Vec2::new(-300.0, 0.0), across) < -4.0);
+        assert!((at + 3.0).abs() < 0.3, "it asked for {} rather than -3", at);
     }
 
+    /// The answer does not depend on which way round the length was handed
+    /// over, beyond its sign, so where a block was grabbed decides nothing.
     #[test]
-    fn a_drag_across_it_asks_for_nothing() {
-        let across = on_screen(looking(), Vec3::ZERO, Vec3::X).expect("x is across the view");
+    fn which_way_the_length_was_given_only_flips_the_sign() {
+        let eye = vec3(0.0, 0.0, 10.0);
+        let aimed = vec3(2.0, 0.0, 0.0);
 
-        let asked = asked_for(Vec2::new(0.0, 300.0), across);
-        assert!(
-            asked.abs() < 0.1,
-            "a drag down the screen asked for {}",
-            asked
-        );
+        let one = along_the_line(eye, aimed - eye, Vec3::ZERO, Vec3::X).unwrap();
+        let other = along_the_line(eye, aimed - eye, Vec3::ZERO, -Vec3::X).unwrap();
+
+        assert!((one + other).abs() < 1e-4, "{} against {}", one, other);
     }
 
+    /// Except dead along the ray, which has no answer rather than a bad one.
     #[test]
-    fn a_direction_pointing_at_the_eye_has_no_screen_way() {
-        // straight towards the camera, which is nowhere on the screen
-        assert!(on_screen(looking(), Vec3::ZERO, Vec3::ZERO).is_none());
-    }
-
-    #[test]
-    fn it_comes_out_the_end_that_was_grabbed() {
-        let middle = vec3(0.0, 1.0, 0.0);
-        let along = Vec3::X;
-
-        // grabbed on the +x half, so it goes +x
-        assert_eq!(
-            grabbed_end(middle, middle + vec3(1.5, 0.0, 0.0), along),
-            Vec3::X
-        );
-    }
-
-    #[test]
-    fn the_other_end_goes_the_other_way() {
-        let middle = vec3(0.0, 1.0, 0.0);
-        let along = Vec3::X;
-
-        assert_eq!(
-            grabbed_end(middle, middle + vec3(-1.5, 0.0, 0.0), along),
-            -Vec3::X
-        );
-
-        // and the answer does not depend on which way `along` was handed over
-        assert_eq!(
-            grabbed_end(middle, middle + vec3(-1.5, 0.0, 0.0), -along),
-            -Vec3::X
-        );
+    fn a_block_down_the_ray_has_no_answer() {
+        assert!(along_the_line(vec3(0.0, 0.0, 10.0), -Vec3::Z, Vec3::ZERO, Vec3::Z).is_none());
     }
 
     #[test]
     fn the_tilt_is_clamped() {
         let target = vec3(0.0, 5.0, 0.0);
 
-        // asked for overhead, and it stops short of it
         let high = eye(target, 0.0, 3.0, 10.0);
-        assert!(high.y - target.y < 10.0, "it went overhead: {}", high);
         assert!((high.y - target.y - HIGHEST.sin() * 10.0).abs() < 1e-4);
 
-        // asked for underneath, and it stops short of the floor
         let low = eye(target, 0.0, -3.0, 10.0);
         assert!(low.y > target.y, "it went under: {}", low);
         assert!((low.y - target.y - LOWEST.sin() * 10.0).abs() < 1e-4);
 
-        // and it is always the right distance away
         for up in [-3.0f32, 0.0, 0.5, 3.0] {
             assert!(((eye(target, 1.0, up, 10.0) - target).length() - 10.0).abs() < 1e-3);
         }

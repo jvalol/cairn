@@ -36,9 +36,19 @@ use glam::{vec3, Vec3};
 pub const PULL_SPEED: f32 = 5.0;
 pub const PULL_PULL: f32 = 80.0;
 
-/// How far a block's middle has to get from the tower's middle before it counts
-/// as out: its own half length, plus half the width of a level, plus a little.
-pub const CLEAR: f32 = HALF.x + HALF.x + 0.2;
+/// How far a block has to travel along its own length before it counts as out:
+/// far enough that its trailing end is past the far side of the tower, which is
+/// its own half length plus half a level's width, which for a block as long as a
+/// level is wide is the whole length.
+///
+/// Measured from where the block started, not from the tower's middle. It was
+/// the distance of the block's middle from the tower's axis, and that is a
+/// different number for every seat of a level: an outer block starts a unit and
+/// a half out and an inner one half a unit, so an inner one needed to travel
+/// 4.17 where an outer one needed 3.93. One pulled out the back of the tower
+/// travelled 4.12, finished up lying on the floor where the camera could not see
+/// it, and was never counted, which looked exactly like a drag that did nothing.
+pub const CLEAR: f32 = HALF.x * 2.0;
 
 /// How far the top of it may drop before the run is over. Two levels: one is
 /// exactly the height of the block just put on top, so losing only that block
@@ -81,9 +91,9 @@ pub struct Run {
     solver: Solver,
     /// The block being held, if one is.
     held: Option<Held>,
-    /// One that was let go part way out and is still clear of the tower's
-    /// footprint, so it can still finish its journey onto the top.
-    coming: Option<usize>,
+    /// One that was let go part way out, kept with where it started and which
+    /// way it is going so it can still finish its journey onto the top.
+    coming: Option<Held>,
     phase: Phase,
     /// The highest level that holds any block, and how many of its seats are
     /// taken.
@@ -153,12 +163,20 @@ impl Run {
     /// below it, which is what stops the game being about taking back the block
     /// just put down.
     pub fn may_take(&self, which: usize) -> bool {
-        which < self.blocks.len() && self.seated[which] + 1 < self.top
+        if which >= self.blocks.len() {
+            return false;
+        }
+
+        // Once it is down, everything is. A heap of blocks on a floor is still
+        // a heap of blocks, and there is nothing left for the rule about the
+        // top two levels to protect.
+        self.phase == Phase::Over || self.seated[which] + 1 < self.top
     }
 
-    /// Takes hold of a block, to be drawn out of the end `way` points at.
+    /// Takes hold of a block. `way` is the block's own length; which end it
+    /// comes out of is decided by which way it is then dragged.
     pub fn grab(&mut self, which: usize, way: Vec3) {
-        if self.phase == Phase::Over || !self.may_take(which) {
+        if !self.may_take(which) {
             return;
         }
 
@@ -169,15 +187,28 @@ impl Run {
             began: self.blocks[which].position,
             asked: 0.0,
         });
-        self.phase = Phase::Pulling;
+
+        // A run that is over stays over. Setting this to Pulling took it out of
+        // Over, so the next step found the tower down all over again, declared
+        // it over all over again, and let go of the block in the player's hand.
+        if self.phase != Phase::Over {
+            self.phase = Phase::Pulling;
+        }
     }
 
-    /// Says how far out the block in hand is wanted, from where it was grabbed.
-    /// Never backwards past where it started: a drag the wrong way asks for
-    /// nothing rather than pushing it through the tower.
+    /// Says how far the block in hand is wanted from where it was grabbed,
+    /// along its own length. Signed: a drag one way takes it out one end and
+    /// the other way the other end.
+    ///
+    /// It used to be clamped at nothing, with the end decided at the grab from
+    /// where the ray met the block. Grabbing a block by its long side says
+    /// nothing about which end was meant, so half the time the end chosen was
+    /// the one pointing into the tower and every drag then asked for a negative
+    /// distance, which the clamp turned into nothing at all. The block sat
+    /// there and the game said nothing.
     pub fn ask_for(&mut self, far: f32) {
         if let Some(held) = self.held.as_mut() {
-            held.asked = far.max(0.0);
+            held.asked = far;
         }
     }
 
@@ -185,7 +216,7 @@ impl Run {
     /// proud while you think about it.
     pub fn let_go(&mut self) {
         if let Some(held) = self.held.take() {
-            self.coming = Some(held.which);
+            self.coming = Some(held);
             if self.phase == Phase::Pulling {
                 self.phase = Phase::Settling;
             }
@@ -228,11 +259,10 @@ impl Run {
             .step(&mut self.blocks, &self.ground, GRAVITY, dt);
 
         // whether it is still being held or was let go part way out
-        let loose = self.held.map(|held| held.which).or(self.coming);
-        if let Some(which) = loose {
-            let at = self.blocks[which].position;
-            if vec3(at.x, 0.0, at.z).length() > CLEAR {
-                self.put_on_top(which);
+        if let Some(loose) = self.held.or(self.coming) {
+            let came = (self.blocks[loose.which].position - loose.began).dot(loose.way);
+            if came.abs() > CLEAR {
+                self.put_on_top(loose.which);
             }
         }
 
@@ -242,6 +272,14 @@ impl Run {
     /// Puts a block that has come out onto the top of the tower, turned the way
     /// that level runs. A full top level starts another.
     fn put_on_top(&mut self, which: usize) {
+        // nothing is put on top of a tower that has come down, and nothing is
+        // counted: the block simply stays wherever the player dragged it
+        if self.phase == Phase::Over {
+            self.held = None;
+            self.coming = None;
+            return;
+        }
+
         if self.filled >= ACROSS {
             self.top += 1;
             self.filled = 0;
@@ -276,7 +314,7 @@ impl Run {
 
     /// Watches the top of the tower, and the run ends when it falls.
     fn watch(&mut self) {
-        let drawing = self.held.map(|held| held.which).or(self.coming);
+        let drawing = self.held.or(self.coming).map(|loose| loose.which);
         let top = self
             .blocks
             .iter()
@@ -420,6 +458,70 @@ mod tests {
 
         settle(&mut run, 900);
         assert_eq!(run.out(), 1, "it was let go and never arrived");
+    }
+
+    /// Spec 0002: once it is down, the blocks are still blocks. A heap on a
+    /// floor is something to push about, and the rule protecting the top two
+    /// levels has nothing left to protect.
+    #[test]
+    fn the_rubble_is_still_blocks() {
+        let mut run = Run::new();
+        settle(&mut run, 600);
+
+        // take a whole level out from under it, which nothing survives
+        for seat in 0..ACROSS {
+            draw_out(&mut run, seat);
+        }
+        settle(&mut run, 1200);
+        assert_eq!(run.phase(), Phase::Over, "it stood on nothing");
+
+        let which = ACROSS * 6;
+        assert!(run.may_take(which), "a block in the rubble refused to move");
+
+        let was = run.blocks()[which].position;
+        let along = run.along(which).expect("it is a block");
+        run.grab(which, along);
+        run.ask_for(2.0);
+        for _ in 0..240 {
+            run.step(1.0 / 120.0);
+        }
+
+        assert!(
+            (run.blocks()[which].position - was).length() > 0.5,
+            "it did not move: {} to {}",
+            was,
+            run.blocks()[which].position
+        );
+        // and nothing is counted or stacked after a run is over
+        let counted = run.out();
+        settle(&mut run, 600);
+        assert_eq!(run.out(), counted, "the rubble was being scored");
+    }
+
+    /// Spec 0002: a block pulled out the back counts the same as one pulled out
+    /// the front. It did not, because how far it had to go was measured from the
+    /// tower's axis and that is a different number for every seat.
+    #[test]
+    fn it_counts_either_way_out() {
+        for sign in [1.0f32, -1.0] {
+            let mut run = Run::new();
+            settle(&mut run, 600);
+
+            // an inner seat, which is the one that had furthest to travel
+            let which = sparing(0);
+            let along = run.along(which).expect("it is a block");
+            run.grab(which, along);
+            run.ask_for(sign * (CLEAR + 1.0));
+
+            let mut ticks = 0;
+            while run.held().is_some() && ticks < 1200 {
+                run.step(1.0 / 120.0);
+                ticks += 1;
+            }
+            settle(&mut run, 600);
+
+            assert_eq!(run.out(), 1, "pulled {} and it did not count", sign);
+        }
     }
 
     #[test]
