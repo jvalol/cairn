@@ -62,6 +62,16 @@ pub enum Phase {
     Over,
 }
 
+/// A block in hand: which, which way it is coming, where it started, and how far
+/// out the drag has asked for.
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    which: usize,
+    way: Vec3,
+    began: Vec3,
+    asked: f32,
+}
+
 pub struct Run {
     blocks: Vec<Body>,
     /// Which level each block belongs to. Blocks are never removed, only moved
@@ -69,8 +79,11 @@ pub struct Run {
     seated: Vec<usize>,
     ground: Vec<Aabb>,
     solver: Solver,
-    /// The block being drawn out, and the way it is going.
-    drawing: Option<(usize, Vec3)>,
+    /// The block being held, if one is.
+    held: Option<Held>,
+    /// One that was let go part way out and is still clear of the tower's
+    /// footprint, so it can still finish its journey onto the top.
+    coming: Option<usize>,
     phase: Phase,
     /// The highest level that holds any block, and how many of its seats are
     /// taken.
@@ -100,7 +113,8 @@ impl Run {
                 vec3(GROUND, 2.0, GROUND),
             )],
             solver: Solver::new(),
-            drawing: None,
+            held: None,
+            coming: None,
             phase: Phase::Choosing,
             top: tower::LEVELS - 1,
             filled: ACROSS,
@@ -121,8 +135,18 @@ impl Run {
         self.out
     }
 
-    pub fn drawing(&self) -> Option<usize> {
-        self.drawing.map(|(which, _)| which)
+    pub fn held(&self) -> Option<usize> {
+        self.held.map(|held| held.which)
+    }
+
+    /// How far the block in hand has actually come, against how far it has been
+    /// asked to come. A block that is pinned shows the two drifting apart,
+    /// which is the player feeling it stick.
+    pub fn slack(&self) -> Option<(f32, f32)> {
+        let held = self.held?;
+        let came = (self.blocks[held.which].position - held.began).dot(held.way);
+
+        Some((came, held.asked))
     }
 
     /// Whether a block may be taken. The top level is not a source, nor the one
@@ -132,28 +156,44 @@ impl Run {
         which < self.blocks.len() && self.seated[which] + 1 < self.top
     }
 
-    /// Starts drawing one out, towards whichever end of it `towards` points at.
-    pub fn take(&mut self, which: usize, towards: Vec3) {
-        if self.phase != Phase::Choosing || !self.may_take(which) {
+    /// Takes hold of a block, to be drawn out of the end `way` points at.
+    pub fn grab(&mut self, which: usize, way: Vec3) {
+        if self.phase == Phase::Over || !self.may_take(which) {
             return;
         }
 
-        let Some(along) = self.along(which) else {
-            return;
-        };
-        let way = if along.dot(towards) < 0.0 {
-            -along
-        } else {
-            along
-        };
-
         self.blocks[which].wake();
-        self.drawing = Some((which, way));
+        self.held = Some(Held {
+            which,
+            way: way.normalize_or_zero(),
+            began: self.blocks[which].position,
+            asked: 0.0,
+        });
         self.phase = Phase::Pulling;
     }
 
+    /// Says how far out the block in hand is wanted, from where it was grabbed.
+    /// Never backwards past where it started: a drag the wrong way asks for
+    /// nothing rather than pushing it through the tower.
+    pub fn ask_for(&mut self, far: f32) {
+        if let Some(held) = self.held.as_mut() {
+            held.asked = far.max(0.0);
+        }
+    }
+
+    /// Lets go. The block stays where it is, which is the move of leaving one
+    /// proud while you think about it.
+    pub fn let_go(&mut self) {
+        if let Some(held) = self.held.take() {
+            self.coming = Some(held.which);
+            if self.phase == Phase::Pulling {
+                self.phase = Phase::Settling;
+            }
+        }
+    }
+
     /// Which way a block's own length runs, in the world.
-    fn along(&self, which: usize) -> Option<Vec3> {
+    pub fn along(&self, which: usize) -> Option<Vec3> {
         let Shape::Block { half } = self.blocks[which].shape else {
             return None;
         };
@@ -168,22 +208,28 @@ impl Run {
         // tower at the instant it was declared down, which is the instant
         // before any of it has actually fallen: the one thing a player wants to
         // watch, stopped dead on the frame it started.
-        if let Some((which, way)) = self.drawing {
-            // Drawn rather than struck, and only along its own length: whatever
-            // the tower is doing to it across that is left alone, so a block
-            // being leaned on can still be pushed about while it comes out.
-            let block = &mut self.blocks[which];
+        if let Some(held) = self.held {
+            // Drawn towards where the drag has asked for, and only along its own
+            // length: whatever the tower is doing to it across that is left
+            // alone, so a block being leaned on can still be pushed about while
+            // it comes out.
+            let block = &mut self.blocks[held.which];
             block.wake();
 
-            let along = block.velocity.dot(way);
-            let more = (PULL_SPEED - along).clamp(-PULL_PULL * dt, PULL_PULL * dt);
-            block.velocity += way * more;
+            let came = (block.position - held.began).dot(held.way);
+            let want = ((held.asked - came) / dt).clamp(-PULL_SPEED, PULL_SPEED);
+            let along = block.velocity.dot(held.way);
+            let more = (want - along).clamp(-PULL_PULL * dt, PULL_PULL * dt);
+
+            block.velocity += held.way * more;
         }
 
         self.solver
             .step(&mut self.blocks, &self.ground, GRAVITY, dt);
 
-        if let Some((which, _)) = self.drawing {
+        // whether it is still being held or was let go part way out
+        let loose = self.held.map(|held| held.which).or(self.coming);
+        if let Some(which) = loose {
             let at = self.blocks[which].position;
             if vec3(at.x, 0.0, at.z).length() > CLEAR {
                 self.put_on_top(which);
@@ -219,7 +265,8 @@ impl Run {
         self.seated[which] = self.top;
         self.filled += 1;
         self.out += 1;
-        self.drawing = None;
+        self.held = None;
+        self.coming = None;
         self.phase = Phase::Settling;
 
         // a contact is remembered by the pair it is between, and one of this
@@ -229,7 +276,7 @@ impl Run {
 
     /// Watches the top of the tower, and the run ends when it falls.
     fn watch(&mut self) {
-        let drawing = self.drawing.map(|(which, _)| which);
+        let drawing = self.held.map(|held| held.which).or(self.coming);
         let top = self
             .blocks
             .iter()
@@ -246,11 +293,13 @@ impl Run {
 
         if top < self.stood - SURVIVES {
             self.phase = Phase::Over;
-            self.drawing = None;
+            self.held = None;
+            self.coming = None;
             return;
         }
 
         if self.phase == Phase::Settling && self.blocks.iter().all(|block| block.asleep) {
+            self.coming = None;
             self.phase = Phase::Choosing;
         }
     }
@@ -269,6 +318,23 @@ mod tests {
         for _ in 0..ticks {
             run.step(1.0 / 120.0);
         }
+    }
+
+    /// Grabs a block, asks for the whole length of a pull, and holds on until
+    /// it is out or it is plainly not coming.
+    fn draw_out(run: &mut Run, which: usize) {
+        let Some(along) = run.along(which) else {
+            return;
+        };
+        run.grab(which, along);
+        run.ask_for(CLEAR + 1.0);
+
+        let mut ticks = 0;
+        while run.held().is_some() && ticks < 1200 {
+            run.step(1.0 / 120.0);
+            ticks += 1;
+        }
+        settle(run, 900);
     }
 
     /// An inner seat on a low level, which is the one a tower can spare. Two
@@ -294,6 +360,66 @@ mod tests {
         assert_eq!(run.levels(), tower::LEVELS, "it came down on its own");
         assert_eq!(run.phase(), Phase::Choosing);
         assert_eq!(run.out(), 0);
+    }
+
+    /// Spec 0002: letting go leaves a block where it is, which is the move of
+    /// leaving one proud while you think about it.
+    #[test]
+    fn letting_go_leaves_it() {
+        let mut run = Run::new();
+        settle(&mut run, 600);
+
+        let which = sparing(0);
+        let along = run.along(which).expect("it is a block");
+        run.grab(which, along);
+        run.ask_for(1.2);
+
+        // held until it has come as far as it was asked for
+        for _ in 0..240 {
+            run.step(1.0 / 120.0);
+        }
+        let (came, asked) = run.slack().expect("still in hand");
+        assert!((came - asked).abs() < 0.2, "it came {} of {}", came, asked);
+
+        run.let_go();
+        let where_it_stopped = run.blocks()[which].position;
+        settle(&mut run, 600);
+
+        assert_eq!(run.out(), 0, "it finished the pull on its own");
+        assert!(
+            (run.blocks()[which].position - where_it_stopped).length() < 0.3,
+            "it wandered off after being let go"
+        );
+        // and it is proud of the tower rather than back in it
+        assert!(came > 0.8, "it never came out at all: {}", came);
+    }
+
+    /// Spec 0002: and one let go past the point of no return still goes on top
+    /// rather than hanging in the air.
+    #[test]
+    fn a_held_block_still_goes_on_top() {
+        let mut run = Run::new();
+        settle(&mut run, 600);
+
+        let which = sparing(0);
+        let along = run.along(which).expect("it is a block");
+        run.grab(which, along);
+        run.ask_for(CLEAR + 1.0);
+
+        // let go the moment it is nearly clear, before it has finished
+        let mut ticks = 0;
+        while run.held().is_some() && ticks < 1200 {
+            run.step(1.0 / 120.0);
+            ticks += 1;
+
+            let at = run.blocks()[which].position;
+            if glam::vec3(at.x, 0.0, at.z).length() > CLEAR - 0.4 {
+                run.let_go();
+            }
+        }
+
+        settle(&mut run, 900);
+        assert_eq!(run.out(), 1, "it was let go and never arrived");
     }
 
     #[test]
@@ -332,8 +458,7 @@ mod tests {
         settle(&mut run, 600);
 
         let was = run.levels();
-        run.take(sparing(0), Vec3::X);
-        settle(&mut run, 900);
+        draw_out(&mut run, sparing(0));
 
         assert_eq!(run.out(), 1, "nothing came out");
         // it went onto the level above the one that was top, which was full
@@ -356,8 +481,7 @@ mod tests {
 
         let mut tops = Vec::new();
         for level in [0usize, 2, 4, 6, 8] {
-            run.take(evenly(level), Vec3::X);
-            settle(&mut run, 900);
+            draw_out(&mut run, evenly(level));
             tops.push(run.top);
         }
 
@@ -381,8 +505,7 @@ mod tests {
 
         for (n, level) in [0usize, 2, 4].iter().enumerate() {
             assert_eq!(run.out(), n as u32);
-            run.take(sparing(*level), Vec3::X);
-            settle(&mut run, 900);
+            draw_out(&mut run, sparing(*level));
         }
 
         assert_eq!(run.out(), 3);
@@ -395,8 +518,7 @@ mod tests {
 
         // take a whole level out from under it, which nothing survives
         for seat in 0..ACROSS {
-            run.take(seat, Vec3::X);
-            settle(&mut run, 600);
+            draw_out(&mut run, seat);
         }
         settle(&mut run, 900);
 
@@ -410,8 +532,7 @@ mod tests {
 
         // one block out and onto the floor beside the tower, which happens on
         // purpose every turn and must not end anything
-        run.take(sparing(0), Vec3::X);
-        settle(&mut run, 900);
+        draw_out(&mut run, sparing(0));
 
         assert_ne!(run.phase(), Phase::Over, "one block out ended the run");
         assert_eq!(run.levels(), tower::LEVELS + 1);
@@ -423,8 +544,7 @@ mod tests {
             let mut run = Run::new();
             settle(&mut run, 600);
             for level in [0usize, 2, 4] {
-                run.take(sparing(level), Vec3::X);
-                settle(&mut run, 900);
+                draw_out(&mut run, sparing(level));
             }
             run
         };

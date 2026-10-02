@@ -1,5 +1,6 @@
 //! cairn: a tower of blocks you take apart one at a time. See `specs/`.
 
+mod hand;
 mod rules;
 mod tower;
 
@@ -55,10 +56,21 @@ struct Cairn {
     /// Which block is under the cursor, and where the camera was looking from,
     /// worked out in `draw` where the camera is.
     picked: Option<usize>,
-    eye: Vec3,
+    /// Where the ray met it, which is the end that was grabbed.
+    aimed: Option<Vec3>,
     /// Where the camera is looking, eased rather than set.
     looking: f32,
+    /// What the whole world looks like from there, kept so a drag can be
+    /// measured along the held block's own length as it lies on the screen.
+    seen: glam::Mat4,
+    /// Where the cursor was when the block in hand was grabbed, and which way
+    /// that block's length runs on the screen.
+    grabbed_at: Vec2,
+    length_on_screen: Vec2,
+    /// Why the last click did nothing, if it did nothing.
+    refused: Option<&'static str>,
     camera_angle: f32,
+    camera_up: f32,
     turning: bool,
     distance: f32,
     quitting: bool,
@@ -72,12 +84,17 @@ impl Cairn {
             run: Run::new(),
             cursor: Vec2::ZERO,
             picked: None,
-            eye: Vec3::ZERO,
+            aimed: None,
             // The sun travels towards -x and -z, so a camera at +x and +z has
             // the tower's shadow directly behind it and the floor reads as
             // empty. From round here it lies across the view.
             looking: tower::LEVELS as f32 * tower::HALF.y * 0.9,
+            seen: glam::Mat4::IDENTITY,
+            grabbed_at: Vec2::ZERO,
+            length_on_screen: Vec2::X,
+            refused: None,
             camera_angle: 2.5,
+            camera_up: 0.35,
             turning: false,
             distance: 18.0,
             quitting: false,
@@ -110,8 +127,18 @@ impl Game for Cairn {
         self.run.step(dt);
 
         let saying = match self.run.phase() {
-            Phase::Choosing => String::from("click a block to draw it out"),
-            Phase::Pulling => String::from("drawing it out"),
+            Phase::Choosing => match self.refused {
+                Some(why) => String::from(why),
+                None => String::from("press on a block and drag to draw it out"),
+            },
+            Phase::Pulling => match self.run.slack() {
+                // the drag has gone somewhere the block has not, which is what
+                // a block that will not come feels like
+                Some((came, asked)) if asked - came > 0.5 => {
+                    String::from("it is not coming. something is on it")
+                }
+                _ => String::from("drawing it out. let go to leave it there"),
+            },
             Phase::Settling => String::from("waiting to see"),
             Phase::Over => format!(
                 "it came down. {} out. space to build it again",
@@ -127,7 +154,7 @@ impl Game for Cairn {
                 self.run.levels()
             ),
             saying,
-            String::from("right-drag walks round it, scroll zooms"),
+            String::from("right-drag turns and tilts, scroll zooms"),
         ]
         .into_iter()
         .enumerate()
@@ -153,7 +180,7 @@ impl Game for Cairn {
             vec4(0.17, 0.19, 0.22, 1.0),
         );
 
-        let drawing = self.run.drawing();
+        let drawing = self.run.held();
         for (which, body) in self.run.blocks().iter().enumerate() {
             let Shape::Block { half } = body.shape else {
                 continue;
@@ -190,13 +217,13 @@ impl Game for Cairn {
         let want = self.run.levels() as f32 * tower::HALF.y * 0.9;
         self.looking += (want - self.looking) * 0.02;
         camera.target = vec3(0.0, self.looking, 0.0);
-        camera.position = camera.target
-            + vec3(
-                self.camera_angle.sin() * self.distance,
-                self.distance * 0.3,
-                self.camera_angle.cos() * self.distance,
-            );
-        self.eye = camera.position;
+        camera.position = hand::eye(
+            camera.target,
+            self.camera_angle,
+            self.camera_up,
+            self.distance,
+        );
+        self.seen = camera.view_projection();
 
         let ray = camera.ray_through(self.cursor);
         self.picked =
@@ -216,7 +243,10 @@ impl Game for Cairn {
     fn process_keyboard(&mut self, input: KeyboardInput) {
         let held = input.state == KeyboardKeyState::Pressed;
         match input.key {
-            KeyboardKey::Space if held => self.run = Run::new(),
+            KeyboardKey::Space if held => {
+                self.run = Run::new();
+                self.refused = None;
+            }
             KeyboardKey::Escape => self.quitting = held,
             _ => (),
         }
@@ -226,27 +256,48 @@ impl Game for Cairn {
         match input.button {
             MouseButton::Right => self.turning = input.is_pressed(),
             MouseButton::Left if input.is_pressed() => {
-                if let Some(which) = self.picked {
-                    // towards the camera, flattened, which is the end of the
-                    // block facing whoever is pulling it
-                    let at = self.run.blocks()[which].position;
-                    let towards = self.eye - at;
+                self.refused = None;
 
-                    self.run
-                        .take(which, vec3(towards.x, 0.0, towards.z).normalize_or_zero());
+                let Some(which) = self.picked else {
+                    return;
+                };
+                if !self.run.may_take(which) {
+                    self.refused = Some("that one is holding up the top. try lower down");
+                    return;
                 }
+
+                let body = self.run.blocks()[which];
+                let Some(along) = self.run.along(which) else {
+                    return;
+                };
+                let way =
+                    hand::grabbed_end(body.position, self.aimed.unwrap_or(body.position), along);
+
+                self.grabbed_at = self.cursor;
+                self.length_on_screen =
+                    hand::on_screen(self.seen, body.position, way).unwrap_or(Vec2::X);
+                self.run.grab(which, way);
             }
+            MouseButton::Left => self.run.let_go(),
             _ => (),
         }
     }
 
     fn cursor_moved(&mut self, position: Vec2) {
         self.cursor = position;
+
+        if self.run.held().is_some() {
+            self.run.ask_for(hand::asked_for(
+                position - self.grabbed_at,
+                self.length_on_screen,
+            ));
+        }
     }
 
     fn mouse_motion(&mut self, delta: Vec2) {
         if self.turning {
             self.camera_angle += delta.x * 0.005;
+            self.camera_up = (self.camera_up - delta.y * 0.004).clamp(hand::LOWEST, hand::HIGHEST);
         }
     }
 
