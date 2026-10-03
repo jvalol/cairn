@@ -507,6 +507,19 @@ mod tests {
 
     /// Spec 0002: and one let go past the point of no return still goes on top
     /// rather than hanging in the air.
+    ///
+    /// Where that point is depends on how well the engine converges friction,
+    /// so it moved when blitzkit's solver passes went from eight to thirty two.
+    /// Measured, letting go this far short of clear:
+    ///
+    /// ```text
+    /// 0.0 to 0.3   it coasts the rest of the way and counts
+    /// 0.4 onwards  it stops where it was let go
+    /// ```
+    ///
+    /// Under the looser solver it coasted from 0.4 as well. A block let go with
+    /// most of itself still in the tower stopping there is the truer answer, so
+    /// this follows the measurement rather than holding the old number.
     #[test]
     fn a_held_block_still_goes_on_top() {
         let mut run = Run::new();
@@ -524,7 +537,7 @@ mod tests {
             ticks += 1;
 
             let at = run.blocks()[which].position;
-            if glam::vec3(at.x, 0.0, at.z).length() > CLEAR - 0.4 {
+            if glam::vec3(at.x, 0.0, at.z).length() > CLEAR - 0.2 {
                 run.let_go();
             }
         }
