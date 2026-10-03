@@ -12,3 +12,7 @@ not a priority, and it never changes once a spec exists.
 | [0002](0002-the-hand.md) | Holding a block rather than watching it leave |
 | [0003](0003-what-wood-looks-like.md) | Grain, drawn rather than loaded |
 | [0004](0004-the-sound-of-wood.md) | A note when a block hits something |
+
+---
+
+I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.
