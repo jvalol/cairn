@@ -87,7 +87,7 @@ because neither tells you anything and both look wrong.
 - Which way the length was handed over only flips the sign, so where a block was grabbed decides nothing. — `hand::tests::which_way_the_length_was_given_only_flips_the_sign`
 - A tower that has come down can still be pushed about, and is not scored. — `rules::tests::the_rubble_is_still_blocks`
 - A block drawn out either end counts the same. — `rules::tests::it_counts_either_way_out`
-- A block held past clear still goes on top. — `rules::tests::a_held_block_still_goes_on_top`
+- A block let go before it is out stays where it was let go. — `rules::tests::one_let_go_short_stays_where_it_is`
 - The tilt is clamped short of overhead and of the floor. — `hand::tests::the_tilt_is_clamped`
 
 ### Verified by hand
