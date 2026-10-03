@@ -19,12 +19,11 @@ pub const HIGHEST: f32 = 1.2;
 /// where the block is asked to be. Nothing is measured in pixels, so it does not
 /// matter how the block's length happens to lie on the screen.
 ///
-/// It was pixels, dragged along that length as it appeared on screen, and the
-/// trouble with that is a block pointing away from the eye: its length is then a
-/// few pixels long however long the block is, the direction is mostly noise, and
-/// a drag of any size asks for almost nothing. What that looked like was blocks
-/// left hanging half out of the tower because finishing the pull had become
-/// impossible.
+/// It was pixels, dragged along that length as it appeared on screen. The
+/// trouble is a block pointing away from the eye: its length is a few pixels
+/// however long the block is, the direction is noise, and any drag asks for
+/// almost nothing. What that looked like was blocks left hanging half out of
+/// the tower because finishing the pull had become impossible.
 ///
 /// Nothing comes back when the line runs along the ray, which is the one case
 /// with no answer rather than a bad one: the cursor is pointing at the whole

@@ -6,35 +6,48 @@ use blitzkit::physics::{Body, Shape, Solver};
 use glam::{vec3, Vec3};
 
 /// How fast a block is drawn out, in units a second, and how hard it is pulled
-/// to get there, in units a second a second. The hand is strong but not
-/// infinitely so. Setting the speed outright made the block unstoppable, and a
-/// neighbour wedged against one of those leaves at whatever speed the solver
-/// needs to get it out of the way: measured, one went thirty three units. How
-/// hard to pull, then, measured by drawing one block out of a full bottom
-/// level and watching how far the worst of the others moved: ```text seat 0
-/// seat 1 seat 2 seat 3 60 6.7s, 0.30 3.5s 2.9s 2.6s, 0.13 80 2.6s, 0.19 0.9s
-/// 1.0s 3.4s, 0.42 100 1.6s, 0.16 0.9s 0.9s 1.2s, 39.70, fatal 120 1.2s, 20.32
-/// 0.9s 0.9s 1.0s, 0.60 150 0.9s, 35.00 0.9s 0.9s 0.9s, 87.11, fatal ```
+/// to get there, in units a second a second.
+///
+/// The hand is strong but not infinitely so. Setting the speed outright made
+/// the block unstoppable, and a neighbour wedged against one leaves at
+/// whatever speed the solver needs to clear it. Measured, one went thirty
+/// three units.
+///
+/// How hard to pull, then, measured by drawing one block out of a full bottom
+/// level and watching how far the worst of the others moved:
+///
+/// ```text
+///       seat 0          seat 1    seat 2    seat 3
+///  60   6.7s, 0.30      3.5s      2.9s      2.6s, 0.13
+///  80   2.6s, 0.19      0.9s      1.0s      3.4s, 0.42
+/// 100   1.6s, 0.16      0.9s      0.9s      1.2s, 39.70, fatal
+/// 120   1.2s, 20.32     0.9s      0.9s      1.0s, 0.60
+/// 150   0.9s, 35.00     0.9s      0.9s      0.9s, 87.11, fatal
+/// ```
+///
 /// Eighty is the last one where nothing is ever launched, and it gives the
 /// game something as well. An inner block slips out in a second; an outer one
 /// is holding up the edge of everything above it, takes three, and lets you
-/// watch it resist. Past a hundred a pulled block can send a neighbour thirty
-/// units or more, which is the engine rather than the game. A driven body
-/// forced through a loaded contact is a case blitzkit has not been asked for
-/// before.
+/// watch it resist.
+///
+/// Past a hundred a pulled block can send a neighbour thirty units or more,
+/// which is the engine rather than the game. A driven body forced through a
+/// loaded contact is a case blitzkit has not been asked for before.
 pub const PULL_SPEED: f32 = 5.0;
 pub const PULL_PULL: f32 = 80.0;
 
 /// How far a block travels along its own length before it counts as out: far
 /// enough that its trailing end is past the far side of the tower. Its own
 /// half length plus half a level's width, which for these blocks is the whole
-/// length. Measured from where the block started, not from the tower's middle.
-/// It was the distance of the block's middle from the tower's axis, which is a
+/// length.
+///
+/// Measured from where the block started, not from the tower's middle. It was
+/// the distance of the block's middle from the tower's axis, which is a
 /// different number for every seat. An outer block starts a unit and a half
 /// out and an inner one half a unit, so an inner one needed 4.17 where an
-/// outer needed 3.93. One pulled out the back of the tower travelled 4.12,
-/// finished up lying on the floor where the camera could not see it, and was
-/// never counted, which looked exactly like a drag that did nothing.
+/// outer needed 3.93. One pulled out the back travelled 4.12, ended on the
+/// floor where the camera could not see it, and was never counted. It looked
+/// exactly like a drag that did nothing.
 pub const CLEAR: f32 = HALF.x * 2.0;
 
 /// How far the top of it may drop before the run is over. Two levels: one is
@@ -208,9 +221,9 @@ impl Run {
             asked: 0.0,
         });
 
-        // A run that is over stays over. Setting this to Pulling took it out of
-        // Over, so the next step found the tower down all over again, declared
-        // it over all over again, and let go of the block in the player's hand.
+        // A run that is over stays over. Setting this to Pulling took it out
+        // of Over, so the next step found the tower down again, declared it
+        // over again, and let go of the block in the player's hand.
         if self.phase != Phase::Over {
             self.phase = Phase::Pulling;
         }
@@ -218,12 +231,14 @@ impl Run {
 
     /// Says how far the block in hand is wanted from where it was grabbed,
     /// along its own length. Signed: a drag one way takes it out one end and
-    /// the other way the other end. It used to be clamped at nothing, with the
-    /// end decided at the grab from where the ray met the block. Grabbing a
-    /// block by its long side says nothing about which end was meant. Half the
-    /// time the end chosen pointed into the tower, every drag asked for a
-    /// negative distance, and the clamp turned that into nothing. The block
-    /// sat there and the game said nothing.
+    /// the other way the other end.
+    ///
+    /// It used to be clamped at nothing, with the end decided at the grab from
+    /// where the ray met the block. Grabbing a block by its long side says
+    /// nothing about which end was meant. Half the time the end chosen pointed
+    /// into the tower, every drag asked for a negative distance, and the clamp
+    /// turned that into nothing. The block sat there and the game said
+    /// nothing.
     pub fn ask_for(&mut self, far: f32) {
         if let Some(held) = self.held.as_mut() {
             held.asked = far;
@@ -433,9 +448,9 @@ mod tests {
     }
 
     /// An inner seat on a low level, which is the one a tower can spare. Two
-    /// from the same level is half of it, and a tower does not survive that:
-    /// these tests took blocks 0, 1 and 2 to begin with and the second one
-    /// brought the whole thing down, correctly.
+    /// from the same level is half of it, and a tower does not survive that.
+    /// These tests took blocks 0, 1 and 2 to begin with, and the second
+    /// brought the whole thing down.
     fn sparing(level: usize) -> usize {
         level * ACROSS + 1
     }

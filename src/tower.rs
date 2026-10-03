@@ -18,10 +18,10 @@ pub const ACROSS: usize = 4;
 pub const LONG: f32 = 4.0;
 
 /// The gap between two blocks of a level. Real ones are cut a hair narrow and
-/// it matters twice over: a level with no gaps reads as one slab, so a block
-/// drawn out of it leaves a hole nobody can see, and blocks pressed against
-/// each other are held by their sides as well as from above, which is grip the
-/// game should not have.
+/// it matters twice over. A level with no gaps reads as one slab, so a block
+/// drawn out leaves a hole nobody can see. And blocks pressed against each
+/// other are held by their sides as well as from above, which is grip the game
+/// should not have.
 pub const GAP: f32 = 0.08;
 
 /// Half a block. Square in section, so its width and its thickness are the same

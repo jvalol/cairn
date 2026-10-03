@@ -25,44 +25,44 @@ the place on its own length nearest to whatever the cursor is pointing at. Let g
 and it stops where it is.
 
 Nearest point on a line to a ray, not pixels of drag. Pixels was the first
-attempt, measured along the block's length as that length lay on the screen, and
-it fails for exactly the blocks half of a square tower has: one pointing away
-from the eye is a few pixels long however long it is, so its direction is mostly
-noise and a drag of any size asks for almost nothing. What that looked like was
-blocks left hanging part way out, because finishing the pull had become
-impossible. A block pointing straight down the ray is the one case with no
-answer, and it says so and asks you to walk round a little.
+attempt, measured along the block's length as it lay on the screen. It fails
+for exactly the blocks half a square tower has. One pointing away from the eye
+is a few pixels long however long it is, so its direction is noise and any drag
+asks for almost nothing. What that looked like was blocks left hanging part way
+out, because finishing the pull had become impossible. A block pointing
+straight down the ray is the one case with no answer, and it says so and asks
+you to walk round a little.
 
-So a block that is half out stays half out. That is a real position in this game
-and it was not reachable before: it is how you find out whether the one above has
-settled onto what is left, and it is the move of leaving a block proud while you
+So a block that is half out stays half out. That is a real position in this
+game and it was not reachable before. It is how you find out whether the one
+above has settled onto what is left, and how you leave a block proud while you
 think.
 
-**The hand is still not infinitely strong.** Spec 0001's acceleration stays, and
-it is what the drag feeds: the drag says where the block should be, and the block
-gets there as fast as eighty units a second a second will carry it against
-whatever is leaning on it. Dragging further does not pull harder, it only asks
-for more. A block that is pinned does not come, and you can feel that it is not
-coming because the cursor has gone somewhere the block has not.
+**The hand is still not infinitely strong.** Spec 0001's acceleration stays,
+and it is what the drag feeds. The drag says where the block should be, and it
+gets there as fast as eighty units a second a second will carry it. Dragging
+further does not pull harder, it only asks for more. A block that is pinned
+does not come, and you can feel that it is not coming because the cursor has
+gone somewhere the block has not.
 
 **It comes out the end you drag it towards.** Not "towards the camera", which
-meant walking round the tower to pull from the other side without ever being told
-so. And not "the end you grabbed", which is what this spec said first and which
-was worse: a block taken hold of anywhere along its long side says nothing about
-which end was meant, so half the time the end chosen was the one pointing into
-the tower, every drag then asked for a negative distance, that was clamped at
-nothing, and the block sat there while the game said nothing at all. The drag
-carries its sign now and the block goes whichever way it is pulled.
+meant walking round the tower to pull from the other side without ever being
+told so. And not "the end you grabbed", which is what this spec said first and
+which was worse. A block taken hold of anywhere along its long side says
+nothing about which end was meant. Half the time the end chosen pointed into
+the tower, every drag asked for a negative distance, the clamp turned that into
+nothing, and the block sat there. The drag carries its sign now and the block
+goes whichever way it is pulled.
 
 **Either way out counts.** How far a block had to go was measured as the
 distance of its middle from the tower's axis, which is a different number for
-every seat of a level: an outer block starts a unit and a half out and an inner
-one half a unit, so an inner one had to travel 4.17 where an outer one needed
-3.93. One drawn out the back of the tower travelled 4.12, finished up lying on
-the floor where the camera could not see it, and was never counted. What that
-looked like was a drag that did nothing, in one direction only. It is measured
-along the block's own length from where it started now, which is the same number
-wherever the block sat.
+every seat. An outer block starts a unit and a half out and an inner one half a
+unit, so an inner one had to travel 4.17 where an outer needed 3.93. One drawn
+out the back of the tower travelled 4.12, finished up lying on the floor where
+the camera could not see it, and was never counted. What that looked like was a
+drag that did nothing, in one direction only. It is measured along the block's
+own length from where it started now, which is the same number wherever the
+block sat.
 
 **Once it is down, the blocks are still blocks.** A run that has ended stops
 counting and stops stacking, and everything on the floor can still be pushed

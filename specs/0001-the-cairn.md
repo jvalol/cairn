@@ -18,7 +18,7 @@ rolling on a flat floor.
 
 Specs 0034, 0035 and 0036 gave it boxes, orientation, contact patches, warm
 starting and sleeping. Nothing has asked for any of it yet. This does, and it
-asks for all of it at once: a block only rests on another because a contact is
+asks for all of it at once. A block only rests on another because a contact is
 four points rather than one, and a stack only stands still because a contact
 remembers what it pushed with last frame.
 
@@ -34,8 +34,8 @@ with their gaps come to exactly a block's length, so every level is square in
 plan and the one above lands square on it. Forty eight blocks.
 
 Four to a level and not three, because three is the game this will be compared
-to and because four leaves a margin: take one of four and three remain, two of
-them still under the level above. Take one of three and the level is a see-saw.
+to and four leaves a margin. Take one of four and three remain, two still under
+the level above. Take one of three and the level is a see-saw.
 
 **Not the open lattice of two that spec 0036 describes.** That shape was chosen
 to be hard on the engine, which it is: every contact is a small patch near a
@@ -98,9 +98,9 @@ that is not a block landing on a block.
 
 ## The numbers are measured, not reasoned
 
-Spec 0036 measured a twenty level lattice. This is a twelve level stack of four,
-which is a different thing, and the friction that lets a block be slid out
-without dragging its neighbours with it is a number to find rather than to pick.
+Spec 0036 measured a twenty level lattice. This is a twelve level stack of
+four, which is a different thing. The friction that lets a block slide out
+without dragging its neighbours is a number to find rather than to pick.
 Nothing in here is settled until it has been run.
 
 ## Acceptance criteria
@@ -156,20 +156,20 @@ from every other level punches a line down one side, and the tower came down on
 the fourth. Alternating the two inner seats, the same five takes pass. Nothing
 in the rules says this; it is what the tower does.
 
-**A block is drawn out rather than struck**, and by a hand that is strong rather
-than infinitely strong. Setting its speed outright made it unstoppable, and a
-neighbour wedged against something unstoppable leaves at whatever speed the
-solver needs to get it out of the way: measured, one went thirty three units.
-Pulled at an acceleration instead, with the across-the-length part of its
-velocity left alone, a block that is holding something up takes a moment to come
-free and what it is holding up gets a shove rather than a launch.
+**A block is drawn out rather than struck**, and by a hand that is strong
+rather than infinitely strong. Setting its speed outright made it unstoppable,
+and a neighbour wedged against something unstoppable leaves at whatever speed
+the solver needs to get it out of the way: measured, one went thirty three
+units. Pulled at an acceleration instead, with the across-the-length part of
+its velocity left alone, a block holding something up takes a moment to come
+free and what it holds gets a shove rather than a launch.
 
 That acceleration is the game's best number. At eighty an inner block slips out
 in a second and an outer one takes three and lets you watch it resist, which is
 the tower telling you what it was doing. Past a hundred a pulled block can send
-a neighbour thirty units or more, and that is the engine rather than the game: a
-driven body forced through a loaded contact is a case blitzkit has not been asked
-for before.
+a neighbour thirty units or more, and that is the engine rather than the game.
+A driven body forced through a loaded contact is a case blitzkit has not been
+asked for.
 
 **A run that is over goes on being stepped.** It did not, and what that looked
 like was the tower stopping dead at the instant it was declared down, which is
@@ -180,10 +180,10 @@ frozen on the frame it started.
 just put on top, so losing only that block ended the run. Two.
 
 **The solver forgets when a block is put on top.** A contact is remembered by
-the pair it is between and the features that touched, per blitzkit's spec 0036,
-and a block that has been moved from the bottom of the tower to the top is not
-in any of the contacts it was in. Carrying those over would hand the new
-position an impulse the old one earned.
+the pair it is between and the features that touched, per blitzkit's spec 0036.
+A block moved from the bottom of the tower to the top is in none of the
+contacts it was in. Carrying those over would hand the new position an impulse
+the old one earned.
 
 **Nothing is ever removed from the list.** A block that comes out is moved, not
 deleted, so no index ever shifts and the level each block belongs to can live in
