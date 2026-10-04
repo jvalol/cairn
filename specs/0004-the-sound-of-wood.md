@@ -46,10 +46,10 @@ frames, and dozens of knocks together is a bang with no shape. The loudest few
 of any one step are heard and the rest are not, which is close to what happens
 in a room anyway.
 
-**And the sound may not fall behind what is happening.** The engine plays what it
-is handed one sound after another rather than over the top of each other, so a
-collapse given to it whole is a collapse still being heard once everything has
-come to rest: eighty knocks is six seconds of clattering after the last block has
+**And the sound may not fall behind what is happening.** The engine plays what
+it is handed one sound after another rather than over the top of each other, so
+a collapse given to it whole is still being heard once everything has come to
+rest. Eighty knocks is six seconds of clattering after the last block has
 stopped. Nothing is queued while there is already more than a tenth of a second
 waiting. What cannot be played while it is still happening is not played.
 

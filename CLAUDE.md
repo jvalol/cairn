@@ -49,8 +49,8 @@ twelve levels, square in section. Not fifty four, three, eighteen, and half
 again as wide as thick.
 
 **A `Solver` kept across frames, not the free `step`.** Blitzkit's free step
-remembers nothing between frames and puts nothing to sleep, which is right for
-a few balls on a table and wrong for this: a twelve level stack sags the moment
+remembers nothing between frames and puts nothing to sleep. That is right for a
+few balls on a table and wrong for this: a twelve level stack sags the moment
 it is built without warm starting, and leans while the player is thinking
 without sleeping.
 
