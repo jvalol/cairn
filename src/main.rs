@@ -50,7 +50,73 @@ fn hit_block(ray: &Ray, middle: Vec3, turn: Quat, half: Vec3) -> Option<f32> {
     }
 }
 
+/// Whether this run is only here to be photographed, for `refresh-screenshots`
+/// in the project above.
+fn staged() -> bool {
+    std::env::args().any(|arg| arg == "--screenshot")
+}
+
+/// Pulls a few blocks for the camera and leaves one proud. See
+/// `refresh-screenshots`.
+///
+/// The opening frame is a tower nobody has touched, which is a photograph of a
+/// stack of wood. The game is the holes, so this takes three out and leaves a
+/// fourth half drawn, which is the move of leaving one proud while you think.
+///
+/// Done in one go rather than over real seconds, because the shutter is on a
+/// timer and will not wait for a tower to settle between pulls.
+fn pose(run: &mut Run) {
+    let step = 1.0 / 120.0;
+    let settle = |run: &mut Run, seconds: f32| {
+        let mut at = 0.0;
+        while at < seconds {
+            run.step(step);
+            at += step;
+        }
+    };
+
+    let mut taken = 0;
+    for which in 0..run.blocks().len() {
+        if taken == 3 {
+            break;
+        }
+        if !run.may_take(which) || which % 7 != 2 {
+            continue;
+        }
+        let Some(along) = run.along(which) else {
+            continue;
+        };
+
+        run.grab(which, along);
+        run.ask_for(PULLED_CLEAR);
+        settle(run, 1.2);
+        run.let_go();
+        settle(run, 1.4);
+        taken += 1;
+    }
+
+    // and one left half out of a middle level
+    for which in (0..run.blocks().len()).rev() {
+        if run.may_take(which) && which % 5 == 1 {
+            if let Some(along) = run.along(which) {
+                run.grab(which, along);
+                run.ask_for(PULLED_PROUD);
+                settle(run, 0.9);
+                run.let_go();
+                settle(run, 0.6);
+            }
+            break;
+        }
+    }
+}
+
+/// How far a staged pull takes a block out, and how far it leaves one proud.
+const PULLED_CLEAR: f32 = 2.2;
+const PULLED_PROUD: f32 = 0.55;
+
 struct Cairn {
+    /// Whether this run is held still to be photographed.
+    held: bool,
     block_mesh: Option<MeshId>,
     floor_mesh: Option<MeshId>,
     /// One board of wood per kind, so a tower is not forty eight copies of the
@@ -87,11 +153,18 @@ struct Cairn {
 
 impl Cairn {
     fn new() -> Self {
+        let mut run = Run::new();
+        let held = staged();
+        if held {
+            pose(&mut run);
+        }
+
         Self {
+            held,
             block_mesh: None,
             floor_mesh: None,
             boards: Vec::new(),
-            run: Run::new(),
+            run,
             cursor: Vec2::ZERO,
             picked: None,
             // The sun travels towards -x and -z, so a camera at +x and +z has
@@ -140,7 +213,9 @@ impl Game for Cairn {
         text_renderer: &mut TextRenderer,
         sound_system: &SoundSystem,
     ) {
-        self.run.step(dt);
+        if !self.held {
+            self.run.step(dt);
+        }
 
         self.waiting = (self.waiting - dt).max(0.0);
 

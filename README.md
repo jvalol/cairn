@@ -4,6 +4,8 @@ A tower of blocks you take apart one at a time, putting each one you pull on
 top, until it comes down. One player, one tower, one number at the end: how many
 you got out before it fell.
 
+![A tower of grained wooden blocks, four to a level and turned a quarter turn each level, leaning with holes through it where blocks have been taken out, one block drawn half out of a middle level, and the ones already taken stacked on the top](media/screenshot.png)
+
 ```
 cargo run --release
 ```
