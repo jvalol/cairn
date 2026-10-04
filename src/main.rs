@@ -56,12 +56,21 @@ fn staged() -> bool {
     std::env::args().any(|arg| arg == "--screenshot")
 }
 
-/// Pulls a few blocks for the camera and leaves one proud. See
+/// Takes a few blocks out for the camera and leaves one proud. See
 /// `refresh-screenshots`.
 ///
 /// The opening frame is a tower nobody has touched, which is a photograph of a
-/// stack of wood. The game is the holes, so this takes three out and leaves a
-/// fourth half drawn, which is the move of leaving one proud while you think.
+/// stack of wood. The game is the holes, so this takes three out, which the
+/// rules reseat on top, and leaves a fourth drawn half out of a middle level.
+///
+/// The first attempt asked for 2.2 and nothing came out: `rules::CLEAR` is
+/// what a block has to travel to be free of the tower, and the repo's own test
+/// helper asks for `CLEAR + 1.0`. It read "0 out" and left three planks
+/// hanging off the bottom.
+///
+/// Which blocks: an inner seat on a low level, which `rules`' own tests call
+/// the one a tower can spare. An outer one is fatal and two from the same
+/// level is half of it.
 ///
 /// Done in one go rather than over real seconds, because the shutter is on a
 /// timer and will not wait for a tower to settle between pulls.
@@ -75,44 +84,42 @@ fn pose(run: &mut Run) {
         }
     };
 
-    let mut taken = 0;
-    for which in 0..run.blocks().len() {
-        if taken == 3 {
-            break;
-        }
-        if !run.may_take(which) || which % 7 != 2 {
-            continue;
-        }
+    for level in TAKEN_FROM {
+        let which = level * tower::ACROSS + 1;
         let Some(along) = run.along(which) else {
             continue;
         };
+        if !run.may_take(which) {
+            continue;
+        }
 
         run.grab(which, along);
-        run.ask_for(PULLED_CLEAR);
-        settle(run, 1.2);
-        run.let_go();
-        settle(run, 1.4);
-        taken += 1;
+        run.ask_for(rules::CLEAR + 1.0);
+        let mut ticks = 0;
+        while run.held().is_some() && ticks < 1200 {
+            run.step(step);
+            ticks += 1;
+        }
+        settle(run, 4.0);
     }
 
-    // and one left half out of a middle level
-    for which in (0..run.blocks().len()).rev() {
-        if run.may_take(which) && which % 5 == 1 {
-            if let Some(along) = run.along(which) {
-                run.grab(which, along);
-                run.ask_for(PULLED_PROUD);
-                settle(run, 0.9);
-                run.let_go();
-                settle(run, 0.6);
-            }
-            break;
+    // and one left drawn half out, still in the player's hand
+    let which = LEFT_PROUD * tower::ACROSS + 1;
+    if run.may_take(which) {
+        if let Some(along) = run.along(which) {
+            run.grab(which, along);
+            run.ask_for(rules::CLEAR * 0.55);
+            settle(run, 1.0);
+            run.let_go();
+            settle(run, 0.8);
         }
     }
 }
 
-/// How far a staged pull takes a block out, and how far it leaves one proud.
-const PULLED_CLEAR: f32 = 2.2;
-const PULLED_PROUD: f32 = 0.55;
+/// Which levels the staged shot takes a block from, and which one it leaves a
+/// block proud of. Low, and spread out, so the tower survives three.
+const TAKEN_FROM: [usize; 3] = [1, 3, 5];
+const LEFT_PROUD: usize = 6;
 
 struct Cairn {
     /// Whether this run is held still to be photographed.
