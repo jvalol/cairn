@@ -10,3 +10,21 @@ license = "MIT OR Apache-2.0"
 blitzkit = "0.12"
 glam = "0.33"
 rodio = { version = "0.22", default-features = false }
+
+# Everything cairn depends on is optimised even in a debug build, and cairn
+# itself is not.
+#
+# A debug `cargo run` held 73 frames a second and hitched: the worst frame was
+# 24.7 ms against a median of 13.8, which is the shape you feel rather than
+# measure. Debug Rust is roughly seventy times slower in a tight numeric loop,
+# and a stack of stones settling is one. This holds the median at 8.3 to 8.4 ms
+# and the worst under 10 over two runs, which is what the release build draws.
+#
+# Here and not in the folder this is usually checked out into, because a game
+# that hitches for anybody who clones it hitches wherever it is built, and
+# fixing it only in that folder is how it stays hidden.
+#
+# cairn's own code is left unoptimised, so it still stops where you ask it to
+# and still panics on an overflow rather than wrapping quietly.
+[profile.dev.package."*"]
+opt-level = 3
