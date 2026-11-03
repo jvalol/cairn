@@ -160,9 +160,11 @@ struct Cairn {
 }
 
 impl Cairn {
-    fn new() -> Self {
+    /// `held` rather than a call to `staged()`, so that a picture test can
+    /// ask for the photographed state without putting `--screenshot` in
+    /// its own arguments. `main` passes what the arguments say.
+    fn new(held: bool) -> Self {
         let mut run = Run::new();
-        let held = staged();
         if held {
             pose(&mut run);
         }
@@ -477,5 +479,49 @@ impl Game for Cairn {
 }
 
 fn main() {
-    start("cairn", Box::new(Cairn::new()));
+    start("cairn", Box::new(Cairn::new(staged())));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// How big the picture is: the engine's own size, said once there and
+    /// read here, per its spec 0062.
+    const WIDE: u32 = blitzkit::picture::SIZE.0;
+    const TALL: u32 = blitzkit::picture::SIZE.1;
+
+    /// The tower with three blocks drawn out, held against a picture of
+    /// it. Spec 0005.
+    ///
+    /// **The staging was already here.** `--screenshot` draws a block out
+    /// of levels 1, 3 and 5 and leaves one proud of level 6, because a
+    /// tower nobody has touched is a photograph of a setup. That is the
+    /// frame `refresh-screenshots` takes, so this holds the picture that
+    /// is already on show.
+    ///
+    /// The pose runs on `Run`'s own fixed step inside `new`, before
+    /// anything is drawn, so there is no `update` here at all: a `dt` of
+    /// nought would only ease the camera, and the camera is already where
+    /// `new` put it.
+    #[test]
+    fn the_tower_drawn_out_looks_right() {
+        let reference =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/pictures/drawn-out.png");
+
+        blitzkit::picture::drawn_looks_right(&reference, (WIDE, TALL), |renderer| {
+            let mut game = Cairn::new(true);
+            let mut geometry = Geometry::new();
+            let mut text = TextRenderer::new();
+            let sound = SoundSystem::new();
+            let mut scene = Scene::new();
+            let mut camera = Camera::new();
+
+            game.load(renderer);
+            game.initialize(&mut geometry, &mut text, &sound, (WIDE as f32, TALL as f32));
+            game.draw(&mut scene, &mut camera);
+
+            (scene, camera)
+        });
+    }
 }
